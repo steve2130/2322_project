@@ -7,18 +7,46 @@ import socket
 import asyncio
 from time import process_time
 import os 
+import datetime
+from email import utils
 
-class HTTPResponse(object):
-    OK = "HTTP/1.1 200 OK\n\n"
-    BAD_REQUEST = "HTTP/1.1 400 Bad Request\n\n"
-    NOT_FOUND = "HTTP/1.1 404 Not Found\n\n"
-    NOT_MODIFIED = "HTTP/1.1 304 Not Modified\n\n"
+class HTTPStatus(object):
+    OK = "HTTP/1.1 200 OK\r\n"
+    BAD_REQUEST = "HTTP/1.1 400 Bad Request\r\n"
+    NOT_FOUND = "HTTP/1.1 404 Not Found\r\n"
+    NOT_MODIFIED = "HTTP/1.1 304 Not Modified\r\n"
 
 
 class TypeOfContent(object):
-    HTML = 'Content-Type: text/html\n\n'
-    PNG = 'Content-Type: img/png\n\n'
-    JPG = 'Content-Type: img/jpg\n\n'
+    HTML = 'Content-Type: text/html\r\n'
+    PNG = 'Content-Type: img/png\r\n'
+    JPG = 'Content-Type: img/jpg\r\n'
+
+
+class HTTPResponse(object):
+    def __init__(self):
+        # Essential Header
+        self.HTTPStatus = None
+        self.Date = None
+        self.Server = "Server: Tommy's overnight work!!!!!!\r\n"
+        self.ContentType = None
+
+        # Optional Header
+        self.Connection = ""
+        self.KeepAlive = ""
+        self.LastModified = ""
+        
+        # The message itself
+        self.ResponseHeader = ""
+        self.ResponseBody = ""
+        self.Response = ""
+
+    
+    def GetHTTPDate(self):
+        # https://stackoverflow.com/questions/3453177/convert-python-datetime-to-rfc-2822
+        RFC2822Date = utils.format_datetime(datetime.datetime.now())
+        return "Date: " + RFC2822Date
+
 
 
 class HTTPRequest(object):
@@ -27,9 +55,8 @@ class HTTPRequest(object):
         self.FileURL = None
         self.HTTPVersion = None
         self.HTTPStatus = None
-        self.ResponseHead = ""
-        self.ResponseBody = ""
-        self.keep_alive = False
+        self.KeepAlive = False
+        self.IfModifiedSince = None
 
 
     @staticmethod
@@ -50,7 +77,7 @@ class HTTPRequest(object):
         for header in request:
             if header.find(": ") != -1:     # Find the header with ": "
                 HeaderName, HeaderValue = header.split(": ")
-                RestOfHeader[HeaderName.lower()] = HeaderValue
+                RestOfHeader[HeaderName.lower()] = HeaderValue.lower()
         
         return RequestType.upper(), FileName, RestOfHeader
 
@@ -65,8 +92,8 @@ class HTTPRequest(object):
         # Checking HTTP Method
         if self.HTTPMethod == "GET" or self.HTTPMethod == "HEAD":
             if self.FileURL == '/':
-                FilePath = 'index.html'
-            FilePath = "htdocs/" + FilePath
+                self.FileURL = '/index.html'
+            FilePath = "htdocs" + self.FileURL
 
         else:   # 400 Bad Request
             BadRequestStatus = True
@@ -74,55 +101,14 @@ class HTTPRequest(object):
 
         # Checking keep-alive
         if 'connection' in RestOfHeader and RestOfHeader["connection"] == "keep-alive":
-            self.keep_alive == True
+            self.KeepAlive = True
 
-        self.DraftingResponse(self.HTTPMethod, FilePath, RestOfHeader, BadRequestStatus)
-
-
-    def DraftingResponse(self, HTTPMethod, FilePath, HeaderDict, BadRequestStatus):
-
-        # Look for the required file
-        FileExistFlag = True    # Because we always can find 400 and 404 html
-
-        if not os.path.isfile(FilePath):
-            FileExistFlag = False
-
-        if BadRequestStatus == True:    # 400
-            self.HTTPStatus = HTTPResponse.BAD_REQUEST
-
-        else:
-            return
-
-
-        if FileExistFlag == True:
-            FileExtension = FilePath.split(".")
-            FileExtension = FileExtension[(len(FileExtension) - 1)].lower()     # Get the extension (jpg, png, html)
-
-            if FileExtension == "jpg" or FileExtension == "png":
-                with open(FilePath, "rb") as File:  # open image in binary mode
-                    self.ResponseBody = File.read()
-                    self.HTTPStatus = HTTPResponse.OK
-                    
-                    if FileExtension == "jpg":
-                        self.ResponseHead = self.ResponseHead + TypeOfContent.JPG
-
-                    elif FileExtension == "png":
-                        self.ResponseHead = self.ResponseHead + TypeOfContent.PNG
-
-            elif FileExtension == "html":
-                with open(FilePath, "r") as File:
-                    self.ResponseBody = File.read()
-                    self.HTTPStatus = HTTPResponse.OK
-                    self.ResponseHead = self.ResponseHead + TypeOfContent.HTML
-
-
-            if self.HTTPMethod == "HEAD":
-                # return only the header    
-                # Should be a nest higher if statement but I am too lazy on recreating header
-                self.ResponseBody = ""
+        return (FilePath, RestOfHeader, BadRequestStatus)
 
 
 
+#----------------------------------------------------------------------------------------
+#----------------------------------------------------------------------------------------
 
 
 async def ServerInitialization(serverSocket):
@@ -130,7 +116,7 @@ async def ServerInitialization(serverSocket):
         # t1_start = process_time()
 
         connectedSocket, clientAddress = await loop.sock_accept(serverSocket)
-        await ServerManager(connectedSocket, clientAddress)
+        await ServerManager(connectedSocket)
 
         # t1_stop = process_time()
         # print("Elapsed time:", t1_stop, t1_start)
@@ -138,10 +124,8 @@ async def ServerInitialization(serverSocket):
 
 
 
-
-
-async def ServerManager(connectedSocket, clientAddress):
-    response = await CreateResponse(connectedSocket, clientAddress)
+async def ServerManager(connectedSocket):
+    response = await CreateResponse(connectedSocket)
     await loop.sock_sendall(connectedSocket, response)
     connectedSocket.close()
 
@@ -149,27 +133,96 @@ async def ServerManager(connectedSocket, clientAddress):
 
 
 
-async def CreateResponse(connectedSocket, clientAddress):
+async def CreateResponse(connectedSocket):
 
     request = (await loop.sock_recv(connectedSocket, 2048)).decode("utf8")
     request = [x.strip() for x in request.split('\r\n')]
 
     if request == "" or request == [] or request == [""]:   # Sometime this happens, maybe due to refresh frequently
-        return HTTPResponse.NOT_FOUND.encode("utf8")       # This is here to avoid runtime error
+        return HTTPStatus.NOT_FOUND.encode("utf8")       # This is here to avoid runtime error
 
     RequestMessage = HTTPRequest()
-    RequestType, FileName = RequestMessage.ProcessingRequest(request)
+    TypeOfFile = TypeOfContent()
+    ResponseMessage = HTTPResponse()
+    FilePath, HeaderDict, BadRequestStatus = RequestMessage.ProcessingRequest(request)
+
+    if RequestMessage.KeepAlive == True:
+        ResponseMessage.Connection = "Connection: Keep-Alive\r\n"
+        ResponseMessage.KeepAlive = "Keep-Alive: timeout=10, max=997\r\n"
+        
+
+    # Look for the required file
+    FileExistFlag = False
+    if os.path.isfile(FilePath):
+        FileExistFlag = True
+
+
+    ResponseMessage.Date = ResponseMessage.GetHTTPDate()
+
+    if BadRequestStatus == True:    # 400
+        ResponseMessage.HTTPStatus = HTTPStatus.BAD_REQUEST
+
+    else:
+        if FileExistFlag == True:
+            FileExtension = FilePath.split(".")
+            FileExtension = FileExtension[(len(FileExtension) - 1)].lower()     # Get the extension (jpg, png, html)
+
+            if FileExtension == "jpg" or FileExtension == "png":
+                with open(FilePath, "rb") as File:  # open image in binary mode
+                    ResponseMessage.ResponseBody = File.read()
+                    ResponseMessage.HTTPStatus = HTTPStatus.OK
+                    
+                    if FileExtension == "jpg":
+                        ResponseMessage.ContentType = TypeOfFile.JPG
+
+                    elif FileExtension == "png":
+                        ResponseMessage.ContentType = TypeOfFile.PNG
+
+            elif FileExtension == "html":
+                with open(FilePath, "r") as File:
+                    ResponseMessage.ResponseBody = File.read()
+                    ResponseMessage.HTTPStatus = HTTPStatus.OK
+                    ResponseMessage.ContentType = TypeOfFile.HTML
+
+
+            if RequestMessage.HTTPMethod == "HEAD":
+                # return only the header    
+                # Should be a nest higher if statement but I am too lazy on recreating header
+                ResponseMessage.ResponseBody = ""
+
+
+        else:  # Cannot find the file
+            FilePath = "htdocs/404.html"
+            with open(FilePath, "r") as File:
+                ResponseMessage.ResponseBody = File.read()
+                ResponseMessage.HTTPStatus = HTTPStatus.NOT_FOUND
+                ResponseMessage.ContentType = TypeOfFile.HTML
+
+
+    ResponseMessage.ResponseHeader = ResponseMessage.HTTPStatus + ResponseMessage.ContentType + ResponseMessage.Date + "\r\n" + ResponseMessage.Server + ResponseMessage.Connection + ResponseMessage.KeepAlive + "\r\n"
+    if isinstance(ResponseMessage.ResponseBody, str):   # Meaning ResponseBody contains HTML file 
+        ResponseMessage.Response = (ResponseMessage.ResponseHeader + ResponseMessage.ResponseBody).encode("utf8") 
+        return ResponseMessage.Response
+
+    else:   # Meaning ResponseBody contains an image
+        ResponseMessage.Response = (ResponseMessage.ResponseHeader).encode("utf8") + ResponseMessage.ResponseBody
+        return ResponseMessage.Response
+    
+
+
+
+
 
     # if RequestType == "GET":
     # # process the GET request
     #     try:
     #         with open("htdocs" + FileName) as file:
     #             content = file.read()
-    #             response = HTTPResponse.OK + content
+    #             response = HTTPStatus.OK + content
     #     except:
     #         with open("htdocs/404.html") as file:
     #             content = file.read()
-    #             response = HTTPResponse.NOT_FOUND + content # 200
+    #             response = HTTPStatus.NOT_FOUND + content # 200
     
 
     # elif RequestType == "HEAD":
@@ -179,15 +232,15 @@ async def CreateResponse(connectedSocket, clientAddress):
 
     #         with open("htdocs" + FileName) as file:
     #             content = file.read()  # Fail proof
-    #             response = HTTPResponse.OK + content
+    #             response = HTTPStatus.OK + content
     #     except:
-    #             response = HTTPResponse.NOT_FOUND           # 404
+    #             response = HTTPStatus.NOT_FOUND           # 404
     
 
     # else:
-    #     response = HTTPResponse. BAD_REQUEST + "Request Not Supported"  # 400
+    #     response = HTTPStatus. BAD_REQUEST + "Request Not Supported"  # 400
 
-    return response.encode("utf8")
+    # return response.encode("utf8")
 
 
 
@@ -214,7 +267,7 @@ serverSocket.listen(128)
 
 
 loop = asyncio.get_event_loop()
-print(f"Listening on {serverPort}")
+print(f"Listening on Port {serverPort}")
 loop.run_until_complete(ServerInitialization(serverSocket))
 
 
