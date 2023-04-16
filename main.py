@@ -87,6 +87,41 @@ class HTTPRequest(object):
         if not os.path.isfile(FilePath):
             FileExistFlag = False
 
+        if BadRequestStatus == True:    # 400
+            self.HTTPStatus = HTTPResponse.BAD_REQUEST
+
+        else:
+            return
+
+
+        if FileExistFlag == True:
+            FileExtension = FilePath.split(".")
+            FileExtension = FileExtension[(len(FileExtension) - 1)].lower()     # Get the extension (jpg, png, html)
+
+            if FileExtension == "jpg" or FileExtension == "png":
+                with open(FilePath, "rb") as File:  # open image in binary mode
+                    self.ResponseBody = File.read()
+                    self.HTTPStatus = HTTPResponse.OK
+                    
+                    if FileExtension == "jpg":
+                        self.ResponseHead = self.ResponseHead + TypeOfContent.JPG
+
+                    elif FileExtension == "png":
+                        self.ResponseHead = self.ResponseHead + TypeOfContent.PNG
+
+            elif FileExtension == "html":
+                with open(FilePath, "r") as File:
+                    self.ResponseBody = File.read()
+                    self.HTTPStatus = HTTPResponse.OK
+                    self.ResponseHead = self.ResponseHead + TypeOfContent.HTML
+
+
+            if self.HTTPMethod == "HEAD":
+                # return only the header    
+                # Should be a nest higher if statement but I am too lazy on recreating header
+                self.ResponseBody = ""
+
+
 
 
 
