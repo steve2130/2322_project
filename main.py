@@ -5,7 +5,7 @@
 
 import socket
 import asyncio
-from time import process_time
+# from time import process_time
 import os 
 import datetime
 from email import utils
@@ -45,9 +45,11 @@ class HTTPResponse(object):
     def GetHTTPDate(self):
         # https://stackoverflow.com/questions/3453177/convert-python-datetime-to-rfc-2822
         RFC2822Date = utils.format_datetime(datetime.datetime.now())
-        return "Date: " + RFC2822Date
+        return RFC2822Date
 
-
+    def CreateResponseHeader(self):
+        self.ResponseHeader = self.HTTPStatus + self.ContentType + "Date: " + self.Date + "\r\n" + self.Server + self.Connection + self.KeepAlive + self.LastModified + "\r\n"
+        return self.ResponseHeader
 
 class HTTPRequest(object):
     def __init__(self):
@@ -166,6 +168,14 @@ async def CreateResponse(connectedSocket):
         if FileExistFlag == True:
             FileExtension = FilePath.split(".")
             FileExtension = FileExtension[(len(FileExtension) - 1)].lower()     # Get the extension (jpg, png, html)
+            ResponseMessage.LastModified = "Last-Modified: " + ResponseMessage.GetHTTPDate() + "\r\n"
+
+            if "if-modified-since" in HeaderDict:
+                SinceTimestamp = HeaderDict["if-modified-since"]
+                SinceTimestamp = datetime.datetime.strptime(SinceTimestamp, '%a, %d %b %Y %H:%M:%S GMT').timestamp()
+
+
+
 
             if FileExtension == "jpg" or FileExtension == "png":
                 with open(FilePath, "rb") as File:  # open image in binary mode
@@ -178,17 +188,24 @@ async def CreateResponse(connectedSocket):
                     elif FileExtension == "png":
                         ResponseMessage.ContentType = TypeOfFile.PNG
 
+                ResponseMessage.ResponseHeader = ResponseMessage.CreateResponseHeader()
+
+
+
             elif FileExtension == "html":
                 with open(FilePath, "r") as File:
                     ResponseMessage.ResponseBody = File.read()
                     ResponseMessage.HTTPStatus = HTTPStatus.OK
                     ResponseMessage.ContentType = TypeOfFile.HTML
-
+                
+                ResponseMessage.ResponseHeader = ResponseMessage.CreateResponseHeader()
 
             if RequestMessage.HTTPMethod == "HEAD":
                 # return only the header    
                 # Should be a nest higher if statement but I am too lazy on recreating header
                 ResponseMessage.ResponseBody = ""
+                # Send the exactly header as using GET
+                ResponseMessage.ResponseHeader = ResponseMessage.CreateResponseHeader()
 
 
         else:  # Cannot find the file
@@ -198,8 +215,11 @@ async def CreateResponse(connectedSocket):
                 ResponseMessage.HTTPStatus = HTTPStatus.NOT_FOUND
                 ResponseMessage.ContentType = TypeOfFile.HTML
 
+            if RequestMessage.HTTPMethod == "HEAD":
+                ResponseMessage.ResponseBody = ""
 
-    ResponseMessage.ResponseHeader = ResponseMessage.HTTPStatus + ResponseMessage.ContentType + ResponseMessage.Date + "\r\n" + ResponseMessage.Server + ResponseMessage.Connection + ResponseMessage.KeepAlive + "\r\n"
+
+    # Create response for GET
     if isinstance(ResponseMessage.ResponseBody, str):   # Meaning ResponseBody contains HTML file 
         ResponseMessage.Response = (ResponseMessage.ResponseHeader + ResponseMessage.ResponseBody).encode("utf8") 
         return ResponseMessage.Response
