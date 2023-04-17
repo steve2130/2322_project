@@ -2,13 +2,14 @@
 # 22083184D
 #
 # Comp2322 Project
-
+import logging
 import socket
 import asyncio
 # from time import process_time
 import os 
-import datetime
+from datetime import datetime
 from email import utils
+
 
 class HTTPStatus(object):
     OK = "HTTP/1.1 200 OK\r\n"
@@ -41,11 +42,6 @@ class HTTPResponse(object):
         self.ResponseBody = ""
         self.Response = ""
 
-    
-    def GetHTTPDate(self):
-        # https://stackoverflow.com/questions/3453177/convert-python-datetime-to-rfc-2822
-        RFC2822Date = utils.format_datetime(datetime.datetime.now())
-        return RFC2822Date
 
     def CreateResponseHeader(self):
         self.ResponseHeader = self.HTTPStatus + self.ContentType + "Date: " + self.Date + "\r\n" + self.Server + self.Connection + self.KeepAlive + self.LastModified + "\r\n"
@@ -105,7 +101,11 @@ class HTTPRequest(object):
         if 'connection' in RestOfHeader and RestOfHeader["connection"] == "keep-alive":
             self.KeepAlive = True
 
-        return (FilePath, RestOfHeader, BadRequestStatus)
+        return (self.HTTPMethod, FilePath, RestOfHeader, BadRequestStatus)
+
+
+
+
 
 
 
@@ -118,7 +118,7 @@ async def ServerInitialization(serverSocket):
         # t1_start = process_time()
 
         connectedSocket, clientAddress = await loop.sock_accept(serverSocket)
-        await ServerManager(connectedSocket)
+        await ServerManager(connectedSocket, clientAddress)
 
         # t1_stop = process_time()
         # print("Elapsed time:", t1_stop, t1_start)
@@ -126,16 +126,19 @@ async def ServerInitialization(serverSocket):
 
 
 
-async def ServerManager(connectedSocket):
-    response = await CreateResponse(connectedSocket)
+async def ServerManager(connectedSocket, clientAddress):
+    response = await CreateResponse(connectedSocket, clientAddress)
     await loop.sock_sendall(connectedSocket, response)
     connectedSocket.close()
 
 
+async def GetHTTPDate():
+    # https://stackoverflow.com/questions/3453177/convert-python-datetime-to-rfc-2822
+    RFC2822Date = utils.format_datetime(datetime.now())
+    return RFC2822Date
 
 
-
-async def CreateResponse(connectedSocket):
+async def CreateResponse(connectedSocket, clientAddress):
 
     request = (await loop.sock_recv(connectedSocket, 2048)).decode("utf8")
     request = [x.strip() for x in request.split('\r\n')]
@@ -143,11 +146,21 @@ async def CreateResponse(connectedSocket):
     if request == "" or request == [] or request == [""]:   # Sometime this happens, maybe due to refresh frequently
         return HTTPStatus.NOT_FOUND.encode("utf8")       # This is here to avoid runtime error
 
+    # Declare Objects
     RequestMessage = HTTPRequest()
     TypeOfFile = TypeOfContent()
     ResponseMessage = HTTPResponse()
-    FilePath, HeaderDict, BadRequestStatus = RequestMessage.ProcessingRequest(request)
+    Log = logging.ServerLogging()
+    HTTPMethod, FilePath, HeaderDict, BadRequestStatus = RequestMessage.ProcessingRequest(request)
 
+    # For Log
+    Log.ClientIP = clientAddress
+    Log.AccessTime = GetHTTPDate()
+    Log.RequestedFileName = FilePath.split("/")[1]
+    Log.ResponseType = HTTPMethod
+
+
+    # Handle keep-alive
     if RequestMessage.KeepAlive == True:
         ResponseMessage.Connection = "Connection: Keep-Alive\r\n"
         ResponseMessage.KeepAlive = "Keep-Alive: timeout=10, max=997\r\n"
@@ -158,23 +171,37 @@ async def CreateResponse(connectedSocket):
     if os.path.isfile(FilePath):
         FileExistFlag = True
 
+    # Get the current date to use in response
+    ResponseMessage.Date = await GetHTTPDate()
+    
+    
+    # 400
+    if BadRequestStatus == True:    
+        with open("htdocs/400.html", "r") as File:
+            ResponseMessage.HTTPStatus = HTTPStatus.BAD_REQUEST
+            ResponseMessage.ResponseBody = File.read()
+            ResponseMessage.ContentType = TypeOfFile.HTML
 
-    ResponseMessage.Date = ResponseMessage.GetHTTPDate()
+        ResponseMessage.ResponseHeader = ResponseMessage.CreateResponseHeader()
 
-    if BadRequestStatus == True:    # 400
-        ResponseMessage.HTTPStatus = HTTPStatus.BAD_REQUEST
-
+    # NOT Bad request
     else:
         if FileExistFlag == True:
             FileExtension = FilePath.split(".")
             FileExtension = FileExtension[(len(FileExtension) - 1)].lower()     # Get the extension (jpg, png, html)
-            ResponseMessage.LastModified = "Last-Modified: " + ResponseMessage.GetHTTPDate() + "\r\n"
-
-            if "if-modified-since" in HeaderDict:
+            ResponseMessage.LastModified = "Last-Modified: " + await GetHTTPDate() + "\r\n"
+            
+            
+            #304
+            if "if-modified-since" in HeaderDict:  
                 SinceTimestamp = HeaderDict["if-modified-since"]
-                SinceTimestamp = datetime.datetime.strptime(SinceTimestamp, '%a, %d %b %Y %H:%M:%S GMT').timestamp()
+                SinceTimestamp = datetime.strptime(SinceTimestamp, '%a, %d %b %Y %H:%M:%S GMT').timestamp()
 
+                FileModifiedTime = datetime.utcfromtimestamp(os.path.getmtime(FilePath)).timestamp()
 
+                if SinceTimestamp > FileModifiedTime:
+                    ResponseMessage.HTTPStatus = HTTPStatus.NOT_MODIFIED
+                    return # No file to be returned
 
 
             if FileExtension == "jpg" or FileExtension == "png":
@@ -217,6 +244,9 @@ async def CreateResponse(connectedSocket):
 
             if RequestMessage.HTTPMethod == "HEAD":
                 ResponseMessage.ResponseBody = ""
+
+            ResponseMessage.ResponseHeader = ResponseMessage.CreateResponseHeader()
+
 
 
     # Create response for GET
