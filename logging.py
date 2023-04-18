@@ -18,6 +18,7 @@ class ServerLogging(object):
         # File doesn't exist 
         if existance == False:
             self.CSVFileCreation()
+            return True
 
         else:
             # compare column headers to check file vaildity
@@ -33,16 +34,37 @@ class ServerLogging(object):
 
             if ColumnList != self.HeaderList:
                 self.CSVFileCreation()
+                return True
 
+            else:
+                # File is ok
+                return True
 
     def CSVFileCreation(self):
         with open("log.csv", "w", newline="") as file:
             Log = csv.DictWriter(file,  delimiter=",",  fieldnames=self.HeaderList)
             Log.writeheader()
 
+        return True
 
-    def FormDate(self):
+    def FormRow(self):
         dict = {
                 "Access Time": self.AccessTime, 
                 "Client IP": self.ClientIP
+                "HTTP Response Status": self.ResponseType
+                "Requested File Name": self.RequestedFileName
                }
+
+        return dict
+
+
+
+    def WriteDataToCSV(self, row):
+        with open("log.csv", "w", newline="") as file:
+            writer = csv.DictWriter(f, fieldnames=self.HeaderList)
+            writer.writerow(row)
+
+    
+    def CSVFactory(self):
+        status = self.CheckFileExtension(self)
+        
