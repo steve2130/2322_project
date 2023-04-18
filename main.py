@@ -2,14 +2,13 @@
 # 22083184D
 #
 # Comp2322 Project
-import logging
 import socket
 import asyncio
 # from time import process_time
 import os 
 from datetime import datetime
 from email import utils
-
+import csv
 
 class HTTPStatus(object):
     OK = "HTTP/1.1 200 OK\r\n"
@@ -107,6 +106,78 @@ class HTTPRequest(object):
 
 
 
+class ServerLogging(object):
+    def __init__(self):
+        self.ClientIP = None
+        self.ClientPort = None
+        self.AccessTime = None
+        self.RequestedFileName = None
+        self.ResponseType = None
+        self.HeaderList = ["Access Time", "Client IP", "Client Port", "HTTP Response Status", "Requested File Name"]
+
+
+    def CheckFileExistence(self):
+        Path = "Log.csv"
+        existance = os.path.exists(Path)
+
+        # File doesn't exist 
+        if existance == False:
+            self.CSVFileCreation()
+            return True
+
+        else:
+            # compare column headers to check file vaildity
+            # https://www.geeksforgeeks.org/get-column-names-from-csv-using-python/
+            with open("Log.csv", "r") as file:
+                reader = csv.DictReader(file, delimiter=',', quotechar='"')
+
+                for row in reader:
+                    ColumnList = (list(row.keys()))
+                    # We just want the column headers
+                    break
+
+            if ColumnList != self.HeaderList:
+                self.CSVFileCreation()
+                return True
+
+            else:
+                # File is ok
+                return True
+
+
+
+    def CSVFileCreation(self):
+        # Overwrite everthing btw
+        with open("Log.csv", "w", newline="\n") as file:
+            Log = csv.DictWriter(file, fieldnames=self.HeaderList)
+            Log.writeheader()
+        return True
+
+
+
+    def FormRow(self):
+        dict = {
+                "Access Time": self.AccessTime, 
+                "Client IP": self.ClientIP,
+                "Client Port": self.ClientPort,
+                "HTTP Response Status": self.ResponseType.replace("HTTP/1.1 ", "").replace("\r\n", ""),
+                "Requested File Name": self.RequestedFileName
+               }
+        return dict
+
+    def WriteDataToCSV(self, row):
+        with open("Log.csv", "a", newline="") as file:
+            writer = csv.DictWriter(file, fieldnames=self.HeaderList)
+            writer.writerow(row)
+
+    
+    def CSVFactory(self):
+        status = self.CheckFileExistence()
+        
+        if status == True:
+            Row = self.FormRow()
+            self.WriteDataToCSV(Row)
+
 
 
 #----------------------------------------------------------------------------------------
@@ -150,15 +221,17 @@ async def CreateResponse(connectedSocket, clientAddress):
     RequestMessage = HTTPRequest()
     TypeOfFile = TypeOfContent()
     ResponseMessage = HTTPResponse()
-    Log = logging.ServerLogging()
+    Log = ServerLogging()
     HTTPMethod, FilePath, HeaderDict, BadRequestStatus = RequestMessage.ProcessingRequest(request)
 
+
     # For Log
-    Log.ClientIP = clientAddress
-    Log.AccessTime = GetHTTPDate()
+    Log.ClientIP, Log.ClientPort = clientAddress
+    Log.AccessTime = await GetHTTPDate()
     Log.RequestedFileName = FilePath.split("/")[1]
     Log.ResponseType = HTTPMethod
 
+    
 
     # Handle keep-alive
     if RequestMessage.KeepAlive == True:
@@ -247,7 +320,8 @@ async def CreateResponse(connectedSocket, clientAddress):
 
             ResponseMessage.ResponseHeader = ResponseMessage.CreateResponseHeader()
 
-
+    Log.ResponseType = ResponseMessage.HTTPStatus
+    Log.CSVFactory()
 
     # Create response for GET
     if isinstance(ResponseMessage.ResponseBody, str):   # Meaning ResponseBody contains HTML file 

@@ -1,14 +1,14 @@
 import http.client
 import pprint
 
-con = http.client.HTTPConnection("localhost", 2130)
+Connection = http.client.HTTPConnection("localhost", 2130)
 
-he = {"Connection" : "keep-alive"}
-con.request("POST", "/", headers=he)
-resp = con.getresponse() # response
-print("Status: {} and reason: {}".format(resp.status, resp.reason))
-headers = resp.getheaders()
-pp = pprint.PrettyPrinter(indent=4)
-pp.pprint("Headers: {}".format(headers))
-print("the body of response:\n", resp.read().decode()) # utf8: string 
-con.close()
+Header = {"Connection" : "keep-alive"}
+Connection.request("POST", "/", headers=Header)
+Response = Connection.getresponse() # response
+print(f"{Connection.status} {Connection.reason}")
+ResponseHeader = Response.getheaders()
+pp = pprint.PrettyPrinter(indent = 4)
+pp.pprint(f"Headers: {ResponseHeader}")
+print(f"Response Content:\n{ResponseHeader.read().decode()}") # utf8: string 
+Connection.close()
