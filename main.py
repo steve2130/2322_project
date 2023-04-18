@@ -268,13 +268,24 @@ async def CreateResponse(connectedSocket, clientAddress):
             #304
             if "if-modified-since" in HeaderDict:  
                 SinceTimestamp = HeaderDict["if-modified-since"]
-                SinceTimestamp = datetime.strptime(SinceTimestamp, '%a, %d %b %Y %H:%M:%S GMT').timestamp()
+                SinceTimestamp = datetime.strptime(SinceTimestamp, '%a, %d %b %Y %H:%M:%S -0000').timestamp()
 
                 FileModifiedTime = datetime.utcfromtimestamp(os.path.getmtime(FilePath)).timestamp()
 
                 if SinceTimestamp > FileModifiedTime:
                     ResponseMessage.HTTPStatus = HTTPStatus.NOT_MODIFIED
-                    return # No file to be returned
+                    ResponseMessage.ResponseBody = ""
+
+                    if FileExtension == "jpg":
+                        ResponseMessage.ContentType = TypeOfContent.JPG
+                    elif FileExtension == "png":
+                        ResponseMessage.ContentType = TypeOfContent.PNG
+                    elif FileExtension == "html":
+                        ResponseMessage.ContentType = TypeOfContent.HTML
+
+                    ResponseMessage.ResponseHeader = ResponseMessage.CreateResponseHeader()
+                    ResponseMessage.Response = (ResponseMessage.ResponseHeader + ResponseMessage.ResponseBody).encode("utf8") 
+                    return ResponseMessage.Response
 
 
             if FileExtension == "jpg" or FileExtension == "png":
@@ -390,7 +401,8 @@ serverSocket.listen(128)
 
 
 
-loop = asyncio.get_event_loop()
+loop = asyncio.new_event_loop()
+asyncio.set_event_loop(loop)
 print(f"Listening on Port {serverPort}")
 loop.run_until_complete(ServerInitialization(serverSocket))
 
